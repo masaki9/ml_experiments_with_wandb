@@ -1,8 +1,9 @@
-import os
-import utils
+import matplotlib.pyplot as plt
+import numpy as np
 import wandb
+import yaml
 
-from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.model_selection import train_test_split, StratifiedKFold, learning_curve
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.svm import SVC
@@ -11,6 +12,53 @@ from ucimlrepo import fetch_ucirepo
 
 import matplotlib
 matplotlib.use('Agg')  # Use Agg to avoid GUI issues
+
+
+def plot_learning_curve(estimator, X_train, y_train, cv, scoring, ylabel, title, train_sizes=np.linspace(0.1, 1.0, 20), ylim=None):
+    """
+    Generates learning curve data and returns a plot.
+
+    Parameters:
+    - estimator: The machine learning model (pipeline) to evaluate.
+    - X_train: Training data features.
+    - y_train: Training data labels.
+    - cv: Cross-validation strategy.
+    - scoring: Scoring method.
+    - ylabel: Label for the y-axis.
+    - title: Title of the plot.
+    - file_name: Name of the file to save the plot.
+    - train_sizes: Array of training sizes to use for generating the learning curve.
+    - ylim: Y-axis limits.
+    """
+    # Generate learning curve data
+    train_sizes, train_scores, test_scores = learning_curve(
+        estimator, X_train, y_train, cv=cv,
+        train_sizes=train_sizes,
+        scoring=scoring, n_jobs=-1)
+
+    # Calculate Mean and Standard Deviation of Training and Test Scores
+    train_means = np.mean(train_scores, axis=1)
+    train_stds = np.std(train_scores, axis=1)
+    test_means = np.mean(test_scores, axis=1)
+    test_stds = np.std(test_scores, axis=1)
+
+    # Plot a learning curve
+    plt.figure(figsize=(8, 4))
+    plt.plot(train_sizes, train_means, label='Training score', color='blue', marker='o')
+    plt.fill_between(train_sizes, train_means - train_stds, train_means + train_stds, color='blue', alpha=0.15)
+    plt.plot(train_sizes, test_means, label='Cross-validation score', color='green', marker='o')
+    plt.fill_between(train_sizes, test_means - test_stds, test_means + test_stds, color='green', alpha=0.15)
+    plt.title(title)
+    plt.xlabel('Training Data Size')
+    plt.ylabel(ylabel)
+    plt.legend(loc='best')
+    plt.grid(True)
+    plt.tight_layout()
+
+    if ylim:
+        plt.ylim(ylim)
+
+    return plt
 
 
 # Define training function
@@ -48,11 +96,11 @@ def main():
     # Calculate the weighted f1 score
     weighted_f1_score = f1_score(y_test, y_pred, average='weighted')
 
-    # Log the learning curve
-    utils.plot_learning_curve(svm_pipe, X_train, y_train, cv=cv, scoring='f1_weighted',
-                              file_name='output/svm_learning_curve.png',
-                              title='SVM Learning Curve (Polynomial Kernel)', ylabel='F1 Score (Weighted)')
-    wandb.log({"learning_curve": wandb.Image('output/svm_learning_curve.png')})
+    # Log a learning curve to wandb
+    plot_learning_curve(svm_pipe, X_train, y_train, cv=cv, scoring='f1_weighted',
+                        title='SVM Learning Curve (Polynomial Kernel)', ylabel='F1 Score (Weighted)', ylim=(0.5, 1.0))
+    wandb.log({"learning_curve": wandb.Image(plt)})
+    plt.close()
 
     # Log a confusion matrix to wandb
     wandb.sklearn.plot_confusion_matrix(y_test, y_pred, labels=svm_pipe.classes_)
@@ -73,42 +121,24 @@ def main():
                 metrics["support"]
             ])
 
-    # Create a wandb Table and log it
+    # Create a wandb Table for the classification report
     class_report_table = wandb.Table(columns=columns, data=table_data)
-    wandb.log({"classification_report_table": class_report_table})
 
-    # Log the f1_weighted score to wandb
-    wandb.log({"F1 Score (Weighted)": weighted_f1_score})
+    # Save the report and F1 score in the run summary
+    wandb.run.summary["classification_report_table"] = class_report_table
+    wandb.run.summary["F1 Score (Weighted)"] = weighted_f1_score
 
     # Finish the wandb run
     wandb.finish()
 
-# Define the sweep configuration
-sweep_config = {
-    'method': 'grid',
-    'metric': {
-        'name': 'F1 Score (Weighted)',
-        'goal': 'maximize'
-    },
-    'parameters': {
-        'C': {
-            'values': [0.1, 0.3, 0.7, 1.0, 1.5]
-        },
-        'coef0': {
-            'values': [0.1, 0.3, 0.7, 1.0, 1.5]
-        },
-        'degree': {
-            'values': [1, 2, 3, 4, 5]
-        }
-    }
-}
 
 if __name__ == '__main__':
-    if not os.path.exists('output'):
-        os.makedirs('output')
+    # Load the sweep configuration
+    with open('sweep_config.yml') as file:
+        sweep_config = yaml.safe_load(file)
 
     # Initialize a wandb sweep
-    sweep_id = wandb.sweep(sweep_config, project='ml-experiments')
+    sweep_id = wandb.sweep(sweep=sweep_config, project='svm-poly-kernel')
 
     # Run the sweep
-    wandb.agent(sweep_id, function=main, count=10)
+    wandb.agent(sweep_id, function=main)
