@@ -1,0 +1,15 @@
+name: wandb
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - matplotlib
+  - numpy
+  - pandas
+  - scikit-learn
+  - scipy
+  - jupyterlab
+  - wandb
+  - pip
+  - pip:
+      - ucimlrepo
