@@ -1,4 +1,4 @@
-### Learning Curves, Validation Curves, and Parameter Tuning with AIDS Clinical Trials Group Study Dataset
+### Hyperparameter Tuning and Experiment Tracking with Weights & Biases
 
 To set up an environment for this repo, run the following:
 ```
